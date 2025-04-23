@@ -1,2 +1,2 @@
-# banocc-cobranza
-This is an AI agent for Banco de Occidente to automate collection tasks.
+# Bancoomeva-Cobranza
+This is an AI agent for Bancoomeva to automate collection tasks.
