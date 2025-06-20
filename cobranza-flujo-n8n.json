@@ -1,0 +1,597 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "f32c6a74-f5a2-41bb-8eec-0c0f59d4077c",
+      "name": "Schedule Trigger (Cada 30 minutos)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "path": "{{$node[\"Set Variables\"].json[\"rutaCarpetaBases\"]}}/{{$node[\"Function - Generar Nombre Archivo\"].json[\"nombreArchivo\"]}}",
+        "options": {}
+      },
+      "id": "cc04e88e-9a4d-42ec-89ef-ffc2a147e5e0",
+      "name": "Read Excel (Base Original)",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Obtener fecha y hora actual en formato \"YYYYMMDD_HHMM\"\nconst ahora = new Date();\nconst año = ahora.getFullYear();\nconst mes = String(ahora.getMonth() + 1).padStart(2, '0');\nconst dia = String(ahora.getDate()).padStart(2, '0');\nconst hora = String(ahora.getHours()).padStart(2, '0');\nconst minutos = String(ahora.getMinutes()).padStart(2, '0');\n\n// Generar nombre de archivo para la base del día\nconst nombreArchivo = `R10_ACUMULADA_${año}${mes}${dia}.xlsx`;\n\n// Devolver objeto con el nombre del archivo\nreturn {\n  nombreArchivo,\n  fechaHora: `${año}${mes}${dia}_${hora}${minutos}`,\n  timestamp: ahora.toISOString()\n};"
+      },
+      "id": "63d0f7d9-8d7e-4a05-a2f1-ebabb702110e",
+      "name": "Function - Generar Nombre Archivo",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "rutaCarpetaBases",
+              "value": "/datos/bases_cobranza"
+            },
+            {
+              "name": "rutaModeloContactabilidad",
+              "value": "/datos/modelos/modelo_contactabilidad.pkl"
+            },
+            {
+              "name": "rutaModeloCanal",
+              "value": "/datos/modelos/modelo_canal_preferido.pkl"
+            },
+            {
+              "name": "rutaScalerContactabilidad",
+              "value": "/datos/modelos/scaler_contactabilidad.pkl"
+            },
+            {
+              "name": "rutaScalerCanal",
+              "value": "/datos/modelos/scaler_canal.pkl"
+            },
+            {
+              "name": "umbralContactabilidad",
+              "value": "26"
+            },
+            {
+              "name": "emailCoordinadores",
+              "value": "coordinador1@example.com,coordinador2@example.com"
+            },
+            {
+              "name": "numeroSMSCoordinadores",
+              "value": "+573123456789,+573123456790"
+            },
+            {
+              "name": "carpetaResultados",
+              "value": "/datos/resultados_cobranza"
+            },
+            {
+              "name": "urlBaseWolkvox",
+              "value": "https://api.wolkvox.com/api/v1"
+            },
+            {
+              "name": "tokenWolkvox",
+              "value": "EXAMPLE_TOKEN_12345"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a92d7dc6-3f83-4dbc-b4a9-ea2acfddbd5a",
+      "name": "Set Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        440,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Esta función aplica los filtros de la estrategia de cobro a la base original\nconst aplicarEstrategiaFiltrado = (data) => {\n  console.log(`Registros iniciales: ${data.length}`);\n  \n  // 1. Filtrar por edad de cartera (EDAD_CARTERA_HOMOLOGADA = 0 o 1)\n  let filtrados = data.filter(row => {\n    return row.EDAD_CARTERA_HOMOLOGADA === 0 || row.EDAD_CARTERA_HOMOLOGADA === 1;\n  });\n  console.log(`Después de filtro por EDAD_CARTERA_HOMOLOGADA: ${filtrados.length}`);\n  \n  // 2. Eliminar registros inactivos\n  filtrados = filtrados.filter(row => {\n    const estado = String(row['DESCRIPCIÓN DEL ESTADO MULTIACTIVA HOY'] || '');\n    return !estado.includes('Inactivo');\n  });\n  console.log(`Después de filtro por estado inactivo: ${filtrados.length}`);\n  \n  // 3. Excluir registros al día (EDAD CARTERA HOY = 0)\n  filtrados = filtrados.filter(row => {\n    return row['EDAD CARTERA HOY'] !== 0;\n  });\n  console.log(`Después de filtro por EDAD CARTERA HOY: ${filtrados.length}`);\n  \n  // 4. Eliminar registros con estado MANTENIDO\n  filtrados = filtrados.filter(row => {\n    return row.ESTADO_CARTERA !== 'MANTENIDO';\n  });\n  console.log(`Después de filtro por ESTADO_CARTERA: ${filtrados.length}`);\n  \n  // 5. Excluir registros con \"Promesa pendiente\"\n  filtrados = filtrados.filter(row => {\n    return row.Estado_compromiso !== 'Promesa pendiente';\n  });\n  console.log(`Después de filtro por Estado_compromiso: ${filtrados.length}`);\n  \n  // 6. Eliminar registros con saldo menor\n  filtrados = filtrados.filter(row => {\n    return row.Saldo_menor !== 'SI' && row.Saldo_menor !== null;\n  });\n  console.log(`Después de filtro por Saldo_menor: ${filtrados.length}`);\n  \n  // 7. Filtros estratégicos adicionales\n  \n  // 7.1 Identificar registros prioritarios (Promesa rota o Promesa hoy)\n  const prioritarios = filtrados.filter(row => {\n    return row.Estado_compromiso === 'Promesa rota' || row.Estado_compromiso === 'Promesa Hoy';\n  });\n  console.log(`Registros prioritarios (Promesa rota/hoy): ${prioritarios.length}`);\n  \n  // 7.2 Filtrar registros con respuestas no efectivas en los últimos 3 días\n  const codigosNoEfectivos = [\n    'TELEFONO_ERRADO',\n    'SIN_ACUERDO_DE_PAGO',\n    'DEJA_MENSAJE_CON_TERCERO',\n    'NO_CONTESTA',\n    'TELEFONO_DANADO',\n    'VOLVER_A_LLAM_LLAMAR_DESP'\n  ];\n  \n  // Obtener fecha actual y restar 3 días (en producción se usaría días hábiles)\n  const hoy = new Date();\n  const tresDiasAtras = new Date(hoy);\n  tresDiasAtras.setDate(hoy.getDate() - 3);\n  \n  // Excluir registros no prioritarios con gestiones no efectivas recientes\n  const noPrioritarios = filtrados.filter(row => {\n    // Si es prioritario, lo mantenemos\n    if (row.Estado_compromiso === 'Promesa rota' || row.Estado_compromiso === 'Promesa Hoy') {\n      return false; // Ya están en la lista de prioritarios\n    }\n    \n    // Si tiene respuesta no efectiva reciente, lo excluimos\n    if (codigosNoEfectivos.includes(row.Respuesta)) {\n      // Convertir fecha_ultima_gestion a objeto Date\n      const fechaGestion = new Date(row.fecha_ultima_gestion);\n      \n      // Si la gestión es reciente (menos de 3 días), excluir\n      if (fechaGestion >= tresDiasAtras) {\n        return false;\n      }\n    }\n    \n    return true; // Mantener en la lista\n  });\n  \n  console.log(`Registros no prioritarios después de filtrar respuestas no efectivas: ${noPrioritarios.length}`);\n  \n  // Combinar registros prioritarios con el resto\n  const resultado = [...prioritarios, ...noPrioritarios];\n  \n  console.log(`Total de registros filtrados: ${resultado.length}`);\n  return resultado;\n};\n\n// Cargar base de datos desde el nodo anterior\nconst baseOriginal = $input.all()[0].json;\n\n// Aplicar estrategia de filtrado\nconst baseFiltrada = aplicarEstrategiaFiltrado(baseOriginal);\n\n// Calcular indicadores básicos\nconst totalOriginal = baseOriginal.length;\nconst totalFiltrado = baseFiltrada.length;\nconst porcentajeFiltrado = (totalFiltrado / totalOriginal) * 100;\n\n// Retornar base filtrada y estadísticas\nreturn {\n  baseFiltrada,\n  estadisticas: {\n    totalOriginal,\n    totalFiltrado,\n    porcentajeFiltrado,\n    timestamp: new Date().toISOString()\n  },\n  modelos: {\n    rutaModeloContactabilidad: $node[\"Set Variables\"].json.rutaModeloContactabilidad,\n    rutaModeloCanal: $node[\"Set Variables\"].json.rutaModeloCanal,\n    rutaScalerContactabilidad: $node[\"Set Variables\"].json.rutaScalerContactabilidad,\n    rutaScalerCanal: $node[\"Set Variables\"].json.rutaScalerCanal\n  }\n};"
+      },
+      "id": "47ee5f67-5c93-42ab-8d30-8b8e26a45e46",
+      "name": "Function - Aplicar Estrategia Filtrado",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "import sys\nimport json\nimport pandas as pd\nimport numpy as np\nimport joblib\nimport os\nfrom datetime import datetime\n\n# Cargar base filtrada desde entrada estándar\ninput_data = json.loads(sys.stdin.read())\nbase_filtrada = input_data['baseFiltrada']\nmodelos_info = input_data['modelos']\n\n# Convertir a DataFrame\ndf_filtrado = pd.DataFrame(base_filtrada)\n\n# Cargar modelos\nmodelo_contactabilidad = joblib.load(modelos_info['rutaModeloContactabilidad'])\nscaler_contactabilidad = joblib.load(modelos_info['rutaScalerContactabilidad'])\nmodelo_canal = joblib.load(modelos_info['rutaModeloCanal'])\nscaler_canal = joblib.load(modelos_info['rutaScalerCanal'])\n\n# Función para extraer características para modelo de contactabilidad\ndef extract_contactabilidad_features(row):\n    \"\"\"Extrae características para el modelo de predicción de contactabilidad\"\"\"\n    features = {}\n    \n    # Características demográficas\n    features['edad_asociado'] = row['EDAD ASOCIADO'] if pd.notna(row['EDAD ASOCIADO']) else 0\n    features['antiguedad'] = row['ANTIGUEDAD DEL ASOCIADO EN COOMEVA'] if pd.notna(row['ANTIGUEDAD DEL ASOCIADO EN COOMEVA']) else 0\n    \n    # Características de la deuda\n    features['edad_cartera'] = row['EDAD CARTERA HOY']\n    features['edad_cartera_homologada'] = row['EDAD_CARTERA_HOMOLOGADA']\n    features['valor_vencido'] = row['VALOR VENCIDO HOY']\n    \n    # Historial de contacto\n    features['gestiones_previas'] = row['Qgestiones'] if pd.notna(row['Qgestiones']) else 0\n    features['promesa_cumplida'] = row['Promesa_Cumplida'] if pd.notna(row['Promesa_Cumplida']) else 0\n    \n    # Estado de cartera (one-hot encoding)\n    estados_cartera = ['DETERIORA', 'NORMALIZA', 'POR VENCER', 'MANTIENE', 'MEJORA']\n    for estado in estados_cartera:\n        features[f'estado_{estado.lower()}'] = 1 if row['ESTADO_CARTERA'] == estado else 0\n    \n    # Disponibilidad de canales\n    features['tiene_celular'] = 1 if pd.notna(row['TELÉFONO CELULAR']) else 0\n    features['tiene_email'] = 1 if pd.notna(row['E-MAIL']) else 0\n    features['tiene_telefono_residencial'] = 1 if pd.notna(row['TELÉFONO RESIDENCIAL']) else 0\n    features['tiene_telefono_oficina'] = 1 if pd.notna(row['TELÉFONO  OFICINA']) else 0\n    \n    # Tipo de cliente\n    features['solo_asociado'] = 1 if row['TIPO CLIENTE'] == 'Solo Asociado' else 0\n    \n    # Prioridades\n    prioridades_monto = ['Monto Alto', 'Monto Medio', 'Monto Bajo']\n    for prioridad in prioridades_monto:\n        if pd.notna(row['PRIORIDAD_MONTO']):\n            features[f'prioridad_monto_{prioridad.lower().replace(\" \", \"_\")}'] = 1 if row['PRIORIDAD_MONTO'] == prioridad else 0\n        else:\n            features[f'prioridad_monto_{prioridad.lower().replace(\" \", \"_\")}'] = 0\n    \n    prioridades_riesgo = ['Riesgo Alto', 'Riesgo Medio', 'Riesgo Bajo']\n    for prioridad in prioridades_riesgo:\n        if pd.notna(row['PRIORIDAD_RIESGO']):\n            features[f'prioridad_riesgo_{prioridad.lower().replace(\" \", \"_\")}'] = 1 if row['PRIORIDAD_RIESGO'] == prioridad else 0\n        else:\n            features[f'prioridad_riesgo_{prioridad.lower().replace(\" \", \"_\")}'] = 0\n    \n    # Nivel de prioridad numérico\n    if pd.notna(row['PRIORIDAD_GESTION']):\n        nivel_prioridad = int(row['PRIORIDAD_GESTION'].split()[-1])\n        features['nivel_prioridad'] = nivel_prioridad\n    else:\n        features['nivel_prioridad'] = 3  # Valor por defecto\n    \n    # Estado de compromiso (one-hot encoding)\n    estados_compromiso = ['Sin promesa', 'Promesa pendiente', 'Promesa rota', 'Promesa Hoy']\n    for estado in estados_compromiso:\n        if pd.notna(row['Estado_compromiso']):\n            features[f'compromiso_{estado.lower().replace(\" \", \"_\")}'] = 1 if row['Estado_compromiso'] == estado else 0\n        else:\n            features[f'compromiso_{estado.lower().replace(\" \", \"_\")}'] = 0\n    \n    # Respuestas simplificadas - para evitar problemas con respuestas no vistas\n    respuestas_comunes = ['NO_CONTESTA', 'TELEFONO_ERRADO', 'PROMESA_DE_PAGO', 'SIN_ACUERDO_DE_PAGO']\n    for respuesta in respuestas_comunes:\n        if pd.notna(row['Respuesta']):\n            features[f'respuesta_{respuesta.lower()}'] = 1 if row['Respuesta'] == respuesta else 0\n        else:\n            features[f'respuesta_{respuesta.lower()}'] = 0\n    \n    return features\n\n# Función para extraer características para modelo de canal\ndef extract_canal_features(row):\n    \"\"\"Extrae características para el modelo de predicción de canal\"\"\"\n    features = {}\n    \n    # Características demográficas\n    features['edad_asociado'] = row['EDAD ASOCIADO'] if pd.notna(row['EDAD ASOCIADO']) else 0\n    features['antiguedad'] = row['ANTIGUEDAD DEL ASOCIADO EN COOMEVA'] if pd.notna(row['ANTIGUEDAD DEL ASOCIADO EN COOMEVA']) else 0\n    \n    # Características de la deuda\n    features['edad_cartera'] = row['EDAD CARTERA HOY']\n    features['valor_vencido'] = row['VALOR VENCIDO HOY']\n    \n    # Historial de contacto\n    features['contacto_previo'] = row['Contacto'] if pd.notna(row['Contacto']) else 0\n    features['contacto_directo_previo'] = row['Contacto Directo'] if pd.notna(row['Contacto Directo']) else 0\n    features['gestiones_previas'] = row['Qgestiones'] if pd.notna(row['Qgestiones']) else 0\n    \n    # Prioridad\n    if pd.notna(row['PRIORIDAD_GESTION']):\n        if row['PRIORIDAD_GESTION'] == 'Prioridad 1':\n            features['prioridad'] = 1\n        elif row['PRIORIDAD_GESTION'] == 'Prioridad 2':\n            features['prioridad'] = 2\n        else:\n            features['prioridad'] = 3\n    else:\n        features['prioridad'] = 3\n    \n    # Estado de cartera\n    features['estado_deteriora'] = 1 if row['ESTADO_CARTERA'] == 'DETERIORA' else 0\n    \n    # Estado de compromiso\n    features['promesa_rota'] = 1 if row['Estado_compromiso'] == 'Promesa rota' else 0\n    features['promesa_hoy'] = 1 if row['Estado_compromiso'] == 'Promesa Hoy' else 0\n    \n    return features\n\n# Función para determinar el mejor canal\ndef determinar_canal_preferido(row):\n    # Verificar disponibilidad de canales\n    canales_disponibles = []\n    has_phone = False\n    has_email = False\n    \n    if pd.notna(row['TELÉFONO CELULAR']):\n        canales_disponibles.extend(['Llamada', 'SMS', 'WhatsApp'])\n        has_phone = True\n    if pd.notna(row['E-MAIL']):\n        canales_disponibles.append('Email')\n        has_email = True\n    if pd.notna(row['TELÉFONO RESIDENCIAL']):\n        canales_disponibles.append('Llamada Residencial')\n        has_phone = True\n    if pd.notna(row['TELÉFONO  OFICINA']):\n        canales_disponibles.append('Llamada Oficina')\n        has_phone = True\n    \n    # Si no hay canales disponibles\n    if not canales_disponibles:\n        return 'Sin canal'\n        \n    # Extraer características base\n    base_features = extract_canal_features(row)\n    \n    # Evaluar cada canal disponible\n    canal_scores = {}\n    \n    for canal in ['Llamada', 'SMS', 'WhatsApp', 'Email']:\n        # Verificar disponibilidad\n        if (canal in ['Llamada', 'SMS', 'WhatsApp'] and not has_phone) or (canal == 'Email' and not has_email):\n            continue\n            \n        # Crear características específicas para este canal\n        canal_feature = base_features.copy()\n        canal_feature['is_llamada'] = 1 if canal == 'Llamada' else 0\n        canal_feature['is_sms'] = 1 if canal == 'SMS' else 0\n        canal_feature['is_whatsapp'] = 1 if canal == 'WhatsApp' else 0\n        canal_feature['is_email'] = 1 if canal == 'Email' else 0\n        canal_feature['has_phone'] = 1 if has_phone else 0\n        canal_feature['has_email'] = 1 if has_email else 0\n        \n        # Convertir a formato para el modelo\n        X_pred = np.array([list(canal_feature.values())])\n        X_pred_scaled = scaler_canal.transform(X_pred)\n        \n        # Predecir probabilidad de efectividad\n        prob = modelo_canal.predict_proba(X_pred_scaled)[0][1]  # Probabilidad de clase 1 (efectivo)\n        canal_scores[canal] = prob\n    \n    # Si no se pudo evaluar ningún canal disponible\n    if not canal_scores:\n        return canales_disponibles[0]\n    \n    # Seleccionar el canal con mayor probabilidad de éxito\n    mejor_canal = max(canal_scores, key=canal_scores.get)\n    return mejor_canal\n\n# Aplicar modelo de canal preferido a cada registro\ndf_filtrado['canal_preferido'] = df_filtrado.apply(determinar_canal_preferido, axis=1)\n\n# Aplicar modelo de contactabilidad\n# Extraer características para cada registro filtrado\nX_predict_features = []\nfor idx, row in df_filtrado.iterrows():\n    features = extract_contactabilidad_features(row)\n    X_predict_features.append(list(features.values()))\n\n# Convertir a array numpy y escalar\nX_predict = np.array(X_predict_features)\nX_predict_scaled = scaler_contactabilidad.transform(X_predict)\n\n# Predecir probabilidad de contacto\ncontacto_prob = modelo_contactabilidad.predict_proba(X_predict_scaled)[:, 1]\ndf_filtrado['probabilidad_contacto'] = contacto_prob * 100  # Convertir a porcentaje\n\n# Generar score combinado y ordenar cartera\ndf_filtrado['nivel_prioridad'] = df_filtrado['PRIORIDAD_GESTION'].str.extract('(\\d+)').astype(int)\ndf_filtrado['score_combinado'] = ((4 - df_filtrado['nivel_prioridad']) * 30) + df_filtrado['probabilidad_contacto']\ndf_optimizado = df_filtrado.sort_values(by='score_combinado', ascending=False)\n\n# Preparar información para exportar\ntimestamp = datetime.now().strftime(\"%Y%m%d_%H%M\")\nnombre_archivo = f'Cartera_Optimizada_{timestamp}.xlsx'\nruta_salida = os.path.join('/tmp', nombre_archivo)\n\n# Guardar Excel\ndf_optimizado.to_excel(ruta_salida, index=False)\n\n# Calcular métricas para alertas\ntotal_registros = len(df_optimizado)\ndistribucion_canales = df_optimizado['canal_preferido'].value_counts().to_dict()\ndistribucion_prioridades = df_optimizado['PRIORIDAD_GESTION'].value_counts().to_dict()\n\n# Preparar respuesta en formato JSON\nresultado = {\n    'ruta_archivo': ruta_salida,\n    'nombre_archivo': nombre_archivo,\n    'estadisticas': {\n        'total_registros': total_registros,\n        'distribucion_canales': distribucion_canales,\n        'distribucion_prioridades': distribucion_prioridades,\n        'probabilidad_contacto_media': float(df_optimizado['probabilidad_contacto'].mean()),\n        'timestamp': timestamp\n    }\n}\n\n# Imprimir resultado en formato JSON\nprint(json.dumps(resultado))",
+        "additionalParameters": {
+          "command": "python"
+        },
+        "executionMode": "runOnceForAllItems",
+        "itemsTo": "inputs"
+      },
+      "id": "28a5c0cb-6dd6-4acf-bc3f-af4d10a0c8da",
+      "name": "Python - Aplicar Modelos ML",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "={{$json}}",
+        "options": {}
+      },
+      "id": "bf913e56-9953-4f2a-b4ec-73cb0b7eead9",
+      "name": "Execute Command Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        1240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "limit",
+        "limit": 1
+      },
+      "id": "44a53c5e-7c96-46d5-a6c0-bebc2b1ec54b",
+      "name": "Limit",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.estadisticas.probabilidad_contacto_media < Number($node[\"Set Variables\"].json.umbralContactabilidad)}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "5ff4bec1-e21a-442a-94e5-c835f4b90a5f",
+      "name": "IF - Alerta Contactabilidad",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "sistema.cobranza@example.com",
+        "toEmail": "={{$node[\"Set Variables\"].json.emailCoordinadores.split(\",\")}}",
+        "subject": "⚠️ ALERTA: Baja contactabilidad detectada - {{$json.estadisticas.timestamp}}",
+        "text": "=Estimado Coordinador,\n\nEl sistema de optimización de estrategias de cobranza ha detectado una tasa de contactabilidad por debajo del umbral establecido.\n\n- Tasa de contactabilidad actual: {{$json.estadisticas.probabilidad_contacto_media.toFixed(2)}}%\n- Umbral mínimo: {{$node[\"Set Variables\"].json.umbralContactabilidad}}%\n- Fecha y hora: {{$json.estadisticas.timestamp}}\n\nRecomendaciones automáticas:\n\n1. Revisar calidad de los datos de contacto\n2. Ajustar horarios de marcación\n3. Evaluar canales alternativos de comunicación\n\nPuede acceder a la cartera optimizada en el siguiente enlace:\n[ENLACE AL ARCHIVO]\n\nDistribución de canales recomendados:\n{{Object.entries($json.estadisticas.distribucion_canales).map(([canal, cantidad]) => `- ${canal}: ${cantidad} registros`).join(\"\\n\")}}\n\nEste mensaje ha sido generado automáticamente por el sistema.\nNo responda a este correo.\n\nSistema de Optimización de Estrategias de Cobranza",
+        "options": {}
+      },
+      "id": "28aff11d-1e2a-429c-804b-5c437c0c9b7c",
+      "name": "Send Email - Alerta",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "from": "Sistema",
+        "to": "={{$node[\"Set Variables\"].json.numeroSMSCoordinadores.split(\",\")}}",
+        "message": "=⚠️ ALERTA: Contactabilidad {{$json.estadisticas.probabilidad_contacto_media.toFixed(2)}}% bajo umbral ({{$node[\"Set Variables\"].json.umbralContactabilidad}}%). Cartera optimizada generada. Revise su correo. {{$json.estadisticas.timestamp}}"
+      },
+      "id": "cfba2bb1-0eb0-4ac7-982d-8d3d0c8e4a40",
+      "name": "Send SMS - Alerta",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        1840,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "sistema.cobranza@example.com",
+        "toEmail": "={{$node[\"Set Variables\"].json.emailCoordinadores.split(\",\")}}",
+        "subject": "Cartera optimizada generada - {{$json.estadisticas.timestamp}}",
+        "text": "=Estimado Coordinador,\n\nEl sistema ha generado automáticamente la cartera optimizada para gestión de cobranza.\n\nResumen de la ejecución:\n- Total de registros: {{$json.estadisticas.total_registros}}\n- Tasa de contactabilidad promedio: {{$json.estadisticas.probabilidad_contacto_media.toFixed(2)}}%\n- Fecha y hora: {{$json.estadisticas.timestamp}}\n\nDistribución por canal recomendado:\n{{Object.entries($json.estadisticas.distribucion_canales).map(([canal, cantidad]) => `- ${canal}: ${cantidad} registros`).join(\"\\n\")}}\n\nDistribución por prioridad:\n{{Object.entries($json.estadisticas.distribucion_prioridades).map(([prioridad, cantidad]) => `- ${prioridad}: ${cantidad} registros`).join(\"\\n\")}}\n\nPuede acceder al archivo de la cartera optimizada en el siguiente enlace:\n[ENLACE AL ARCHIVO]\n\nEste mensaje ha sido generado automáticamente por el sistema.\nNo responda a este correo.\n\nSistema de Optimización de Estrategias de Cobranza",
+        "options": {}
+      },
+      "id": "e5a81b88-4ff6-4c78-ba7f-89c6cc2414e2",
+      "name": "Send Email - Normal",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "path": "={{$node[\"Set Variables\"].json[\"carpetaResultados\"]}}/{{$json.nombre_archivo}}",
+        "options": {}
+      },
+      "id": "c5ac3c2c-1b54-4fac-ac95-f3ba7c6a2d6b",
+      "name": "Write File",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        2040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$node[\"Set Variables\"].json[\"urlBaseWolkvox\"]}}/campaigns/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "bodyContentType": "multipart-form-data",
+          "redirect": {
+            "redirect": {
+              "followRedirects": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$node[\"Set Variables\"].json[\"tokenWolkvox\"]}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "campaign_name",
+              "value": "Cartera_Optimizada_{{$json.estadisticas.timestamp}}"
+            },
+            {
+              "name": "file",
+              "value": "={{$json.ruta_archivo}}"
+            }
+          ]
+        }
+      },
+      "id": "d9f7a2f9-85df-4f7a-a4a0-d2ccc99f618a",
+      "name": "HTTP Request (Carga a Wolkvox)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "={{$node[\"HTTP Request (Carga a Wolkvox)\"].json}}",
+        "options": {}
+      },
+      "id": "5a4cee20-16aa-4dab-b991-13cb48d7e11a",
+      "name": "Registrar Respuesta API",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        2440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$node[\"HTTP Request (Carga a Wolkvox)\"].json.success === true}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "80e44d1e-2cee-45b9-9ae0-c13a559a38a8",
+      "name": "IF - Carga Exitosa",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "sistema.cobranza@example.com",
+        "toEmail": "={{$node[\"Set Variables\"].json.emailCoordinadores.split(\",\")}}",
+        "subject": "✅ Cartera optimizada cargada a Wolkvox - {{$json.estadisticas.timestamp}}",
+        "text": "=Estimado Coordinador,\n\nLa cartera optimizada ha sido cargada exitosamente al sistema Wolkvox para su gestión.\n\n- Nombre de la campaña: Cartera_Optimizada_{{$json.estadisticas.timestamp}}\n- Total de registros cargados: {{$json.estadisticas.total_registros}}\n- ID de campaña asignado: {{$node[\"HTTP Request (Carga a Wolkvox)\"].json.campaign_id || 'No disponible'}}\n\nYa puede acceder al panel de Wolkvox para comenzar la gestión de los registros.\n\nEste mensaje ha sido generado automáticamente por el sistema.\nNo responda a este correo.\n\nSistema de Optimización de Estrategias de Cobranza",
+        "options": {}
+      },
+      "id": "f65a5f0e-3aa9-4eac-a29a-7abd9dd7be9c",
+      "name": "Send Email - Carga Exitosa",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        2840,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "sistema.cobranza@example.com",
+        "toEmail": "={{$node[\"Set Variables\"].json.emailCoordinadores.split(\",\")}}",
+        "subject": "❌ Error al cargar cartera a Wolkvox - {{$json.estadisticas.timestamp}}",
+        "text": "=Estimado Coordinador,\n\nHa ocurrido un error al intentar cargar la cartera optimizada al sistema Wolkvox.\n\n- Nombre de la campaña: Cartera_Optimizada_{{$json.estadisticas.timestamp}}\n- Error: {{$node[\"HTTP Request (Carga a Wolkvox)\"].json.error || 'Error desconocido'}}\n\nLa cartera optimizada ha sido guardada localmente en la siguiente ubicación:\n{{$node[\"Set Variables\"].json[\"carpetaResultados\"]}}/{{$json.nombre_archivo}}\n\nPor favor, realice la carga manual o contacte al equipo de soporte técnico.\n\nEste mensaje ha sido generado automáticamente por el sistema.\nNo responda a este correo.\n\nSistema de Optimización de Estrategias de Cobranza",
+        "options": {}
+      },
+      "id": "9d9c6d31-6a1c-44e3-8d0e-3c7bcae24fc7",
+      "name": "Send Email - Error en Carga",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        2840,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "content": "=# Ejecución completada\n\n## Resumen\n- **Fecha y hora**: {{$json.estadisticas.timestamp}}\n- **Registros procesados**: {{$json.estadisticas.total_registros}}\n- **Tasa de contactabilidad**: {{$json.estadisticas.probabilidad_contacto_media.toFixed(2)}}%\n- **Archivo generado**: {{$json.nombre_archivo}}\n- **Carga a Wolkvox**: {{$node[\"HTTP Request (Carga a Wolkvox)\"].json.success ? '✅ Exitosa' : '❌ Fallida'}}\n\n## Siguientes pasos programados\n- Próxima ejecución: En 30 minutos\n- Monitoreo continuo de contactabilidad\n- Actualización automática de estrategias",
+        "options": {
+          "matchWord": true
+        }
+      },
+      "id": "b9f3a0e0-7b0d-49fb-8abe-bffa63fecea0",
+      "name": "Finish",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        3040,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Cada 30 minutos)": {
+      "main": [
+        [
+          {
+            "node": "Function - Generar Nombre Archivo",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Set Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Generar Nombre Archivo": {
+      "main": [
+        [
+          {
+            "node": "Read Excel (Base Original)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Excel (Base Original)": {
+      "main": [
+        [
+          {
+            "node": "Function - Aplicar Estrategia Filtrado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Aplicar Estrategia Filtrado": {
+      "main": [
+        [
+          {
+            "node": "Python - Aplicar Modelos ML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python - Aplicar Modelos ML": {
+      "main": [
+        [
+          {
+            "node": "Execute Command Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Command Output": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "IF - Alerta Contactabilidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Alerta Contactabilidad": {
+      "main": [
+        [
+          {
+            "node": "Send Email - Alerta",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send SMS - Alerta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Email - Normal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email - Alerta": {
+      "main": [
+        [
+          {
+            "node": "Write File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send SMS - Alerta": {
+      "main": [
+        [
+          {
+            "node": "Write File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email - Normal": {
+      "main": [
+        [
+          {
+            "node": "Write File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write File": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request (Carga a Wolkvox)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request (Carga a Wolkvox)": {
+      "main": [
+        [
+          {
+            "node": "Registrar Respuesta API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Respuesta API": {
+      "main": [
+        [
+          {
+            "node": "IF - Carga Exitosa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Carga Exitosa": {
+      "main": [
+        [
+          {
+            "node": "Send Email - Carga Exitosa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Email - Error en Carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email - Carga Exitosa": {
+      "main": [
+        [
+          {
+            "node": "Finish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email - Error en Carga": {
+      "main": [
+        [
+          {
+            "node": "Finish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
